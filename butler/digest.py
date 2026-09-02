@@ -152,41 +152,70 @@ def query_activitywatch_breakdown(
 
     client_bin = aw_cfg.get("client_bin", "aw-client")
     queries_dir = Path(aw_cfg.get("queries_dir", ""))
+    shell_command = (aw_cfg.get("shell_command") or "").strip()
     bg_apps = set(x.strip().lower() for x in aw_cfg.get("background_apps", []))
 
     app_query_file = queries_dir / "app-breakdown.txt"
     title_query_file = queries_dir / "title-breakdown.txt"
 
-    app_raw = ""
-    title_raw = ""
-
-    if app_query_file.is_file():
-        cmd = [
-            client_bin, "query", str(app_query_file),
+    def run_query(query_file: Path) -> str:
+        if not query_file.is_file():
+            return ""
+        base_cmd = [
+            client_bin, "query", str(query_file),
             "--start", f"{target_date}T00:00:00",
             "--stop", f"{target_date}T23:59:59",
             "--timezone", tz_name,
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+            if shell_command:
+                import shlex
+                if "{cmd}" in shell_command:
+                    pattern = r"^(\S+)\s+-c\s+['\"]?\{cmd\}['\"]?$"
+                    m = re.match(pattern, shell_command)
+                    if m:
+                        shell_bin = m.group(1)
+                        res = subprocess.run(
+                            [shell_bin, "-c", " ".join(shlex.quote(x) for x in base_cmd)],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=15,
+                        )
+                    else:
+                        formatted_cmd = shell_command.format(cmd=" ".join(shlex.quote(x) for x in base_cmd))
+                        res = subprocess.run(
+                            formatted_cmd,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=15,
+                        )
+                else:
+                    res = subprocess.run(
+                        [shell_command, "-c", " ".join(shlex.quote(x) for x in base_cmd)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=15,
+                    )
+            else:
+                res = subprocess.run(
+                    base_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=15,
+                )
             if res.returncode == 0:
-                app_raw = res.stdout
+                return res.stdout
         except Exception:
             pass
+        return ""
 
-    if title_query_file.is_file():
-        cmd = [
-            client_bin, "query", str(title_query_file),
-            "--start", f"{target_date}T00:00:00",
-            "--stop", f"{target_date}T23:59:59",
-            "--timezone", tz_name,
-        ]
-        try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
-            if res.returncode == 0:
-                title_raw = res.stdout
-        except Exception:
-            pass
+    app_raw = run_query(app_query_file)
+    title_raw = run_query(title_query_file)
 
     # Parse app breakdown
     apps: List[Tuple[str, float, str]] = []

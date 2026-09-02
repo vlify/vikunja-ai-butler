@@ -231,6 +231,66 @@ class TestDigest(unittest.TestCase):
             if os.path.exists(backup_file):
                 os.remove(backup_file)
 
+    def test_query_activitywatch_shell_command_invocations(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch, MagicMock
+        from butler.digest import query_activitywatch_breakdown
+
+        with tempfile.TemporaryDirectory() as td:
+            qdir = Path(td)
+            app_q = qdir / "app-breakdown.txt"
+            title_q = qdir / "title-breakdown.txt"
+            app_q.write_text("dummy app query")
+            title_q.write_text("dummy title query")
+
+            sample_app_output = (
+                "Showing 2 events:\n"
+                " - Duration: 01:30:00 \tData: {'app': 'Alacritty', 'title': 'term'}\n"
+                " - Duration: 02:00:00 \tData: {'app': 'cs2', 'title': 'CS2 Game'}\n"
+            )
+            sample_title_output = (
+                "Showing 1 events:\n"
+                " - Duration: 01:30:00 \tData: {'app': 'Alacritty', 'title': 'Working on Butler'}\n"
+            )
+
+            aw_cfg = {
+                "enabled": True,
+                "client_bin": "aw-client",
+                "queries_dir": str(qdir),
+                "shell_command": "fish -c '{cmd}'",
+                "background_apps": ["cs2", "steam"],
+            }
+
+            def mock_run(cmd, **kwargs):
+                mock_res = MagicMock()
+                mock_res.returncode = 0
+                cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+                if "app-breakdown" in cmd_str:
+                    mock_res.stdout = sample_app_output
+                else:
+                    mock_res.stdout = sample_title_output
+                return mock_res
+
+            with patch("subprocess.run", side_effect=mock_run) as run_mock:
+                result = query_activitywatch_breakdown(aw_cfg, "2026-09-02")
+
+                # Verify fish -c was invoked
+                self.assertGreaterEqual(run_mock.call_count, 2)
+                first_call_args = run_mock.call_args_list[0][0][0]
+                if isinstance(first_call_args, list):
+                    self.assertEqual(first_call_args[0], "fish")
+                    self.assertEqual(first_call_args[1], "-c")
+                    self.assertIn("aw-client query", first_call_args[2])
+                else:
+                    self.assertTrue(first_call_args.startswith("fish -c"))
+
+                # Verify cs2 was filtered out from active total (active should be 01:30:00, not 03:30:00)
+                self.assertIn("活跃总时长: 01:30:00", result)
+                self.assertIn("Alacritty: 01:30:00 (100.0%)", result)
+                self.assertNotIn("cs2: 02:00:00", result)
+                self.assertIn("Working on Butler", result)
+
 
 if __name__ == "__main__":
     unittest.main()

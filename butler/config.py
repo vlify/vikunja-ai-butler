@@ -81,6 +81,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": False,
         "client_bin": "aw-client",
         "queries_dir": "",
+        "shell_command": "",
         "background_apps": ["cs2", "steam", "screensaver"],
     },
     "notifier": {

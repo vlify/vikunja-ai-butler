@@ -55,6 +55,8 @@ activitywatch:
   client_bin: "aw-client"
   # Directory containing app-breakdown.txt and title-breakdown.txt queries
   queries_dir: "/path/to/aw-client/queries"
+  # Optional shell execution wrapper template (e.g. "fish -c '{cmd}'" or "" for direct invocation)
+  shell_command: ""
   # Background / idle applications to exclude from active screen time (comma-separated or list)
   background_apps:
     - "cs2"

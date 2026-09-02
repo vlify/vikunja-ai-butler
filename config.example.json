@@ -21,6 +21,7 @@
     "enabled": false,
     "client_bin": "aw-client",
     "queries_dir": "/path/to/aw-client/queries",
+    "shell_command": "",
     "background_apps": ["cs2", "steam", "screensaver"]
   },
   "notifier": {
