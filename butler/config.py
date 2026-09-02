@@ -28,11 +28,13 @@ def load_env_file(env_path: Optional[str] = None, override: bool = False) -> Non
     """
     candidate_paths = []
     if env_path:
-        candidate_paths.append(Path(env_path))
+        candidate_paths.append(Path(os.path.expanduser(env_path)))
     elif "ENV_FILE" in os.environ:
-        candidate_paths.append(Path(os.environ["ENV_FILE"]))
+        candidate_paths.append(Path(os.path.expanduser(os.environ["ENV_FILE"])))
     else:
         candidate_paths.extend([
+            Path.home() / ".config" / "vikunja-ai-butler" / ".env",
+            Path.home() / ".config" / "hermes" / ".env",
             Path.cwd() / ".env",
             Path(__file__).resolve().parent.parent / ".env",
         ])
@@ -57,6 +59,7 @@ def load_env_file(env_path: Optional[str] = None, override: bool = False) -> Non
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
+    "env_file": "",
     "timezone": "Asia/Shanghai",
     "vikunja": {
         "url": "",
@@ -120,12 +123,14 @@ def load_config(config_path: Optional[str] = None, env_path: Optional[str] = Non
     # Search for config file
     candidate_paths = []
     if config_path:
-        candidate_paths.append(Path(config_path))
+        candidate_paths.append(Path(os.path.expanduser(config_path)))
     elif "BUTLER_CONFIG_PATH" in os.environ:
-        candidate_paths.append(Path(os.environ["BUTLER_CONFIG_PATH"]))
+        candidate_paths.append(Path(os.path.expanduser(os.environ["BUTLER_CONFIG_PATH"])))
     else:
         root_dir = Path(__file__).resolve().parent.parent
         candidate_paths.extend([
+            Path.home() / ".config" / "vikunja-ai-butler" / "config.yaml",
+            Path.home() / ".config" / "vikunja-ai-butler" / "config.json",
             Path.cwd() / "config.yaml",
             Path.cwd() / "config.json",
             root_dir / "config.yaml",
@@ -150,6 +155,10 @@ def load_config(config_path: Optional[str] = None, env_path: Optional[str] = Non
 
     if loaded_from_file:
         config = deep_merge(config, loaded_from_file)
+
+    # If env_file specified in config, load it now
+    if config.get("env_file"):
+        load_env_file(config["env_file"], override=True)
 
     # Normalize integer keys in allowed_target_projects
     target_projects = config.get("gtd", {}).get("allowed_target_projects", {})

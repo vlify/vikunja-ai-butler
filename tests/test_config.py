@@ -61,6 +61,27 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["timezone"], "UTC")
         self.assertIn(5, cfg["gtd"]["allowed_target_projects"])
 
+    def test_load_config_with_env_file_setting(self):
+        with tempfile.NamedTemporaryFile("w", delete=False) as env_f:
+            env_f.write("VIKUNJA_URL=http://env-file-instance.local\nVIKUNJA_TOKEN=env_tok_999\n")
+            env_file_path = env_f.name
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as cfg_f:
+            import json
+            json.dump({"env_file": env_file_path, "timezone": "Asia/Shanghai"}, cfg_f)
+            cfg_file_path = cfg_f.name
+
+        try:
+            cfg = load_config(config_path=cfg_file_path)
+            self.assertEqual(cfg["vikunja"]["url"], "http://env-file-instance.local")
+            self.assertEqual(cfg["vikunja"]["token"], "env_tok_999")
+            self.assertEqual(cfg["env_file"], env_file_path)
+        finally:
+            if os.path.exists(env_file_path):
+                os.remove(env_file_path)
+            if os.path.exists(cfg_file_path):
+                os.remove(cfg_file_path)
+
 
 if __name__ == "__main__":
     unittest.main()
