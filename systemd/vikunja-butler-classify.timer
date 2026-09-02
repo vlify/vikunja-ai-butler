@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for Vikunja GTD Inbox Auto-Classifier
+
+[Timer]
+# Runs nightly at 23:40 (or configure to your preferred schedule)
+OnCalendar=*-*-* 23:40:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

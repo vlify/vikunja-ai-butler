@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for Vikunja Daily Evening Summary Digest
+
+[Timer]
+# Runs nightly at 23:15 (or configure to your preferred schedule)
+OnCalendar=*-*-* 23:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

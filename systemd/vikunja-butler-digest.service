@@ -1,0 +1,15 @@
+[Unit]
+Description=Vikunja Daily Evening Summary Digest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Systemd user units support %h as the user's home directory.
+WorkingDirectory=%h/Projects/vikunja-ai-butler
+ExecStart=%h/Projects/vikunja-ai-butler/butler/digest.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

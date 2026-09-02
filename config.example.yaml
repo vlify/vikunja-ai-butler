@@ -1,0 +1,79 @@
+# ==============================================================================
+# Vikunja AI Butler — Main Configuration
+# ==============================================================================
+
+timezone: "Asia/Shanghai" # IANA timezone for daily digest cutoff and display
+
+# Vikunja Connection
+vikunja:
+  # Base URL to Vikunja instance (defaults to VIKUNJA_URL from environment)
+  # url: "https://vikunja.example.com"
+  # API Token (recommended to set via VIKUNJA_TOKEN in .env for security)
+  # token: "your_token_here"
+  timeout_seconds: 30
+
+# GTD Project Mapping & Classification Whitelist
+gtd:
+  # The source inbox project ID to process
+  inbox_project_id: 1
+
+  # Whitelist of allowed target projects for AI classification.
+  # Fail-closed rule: Any suggestion outside this dictionary is rejected immediately.
+  allowed_target_projects:
+    5: "Single Action"
+    6: "Project"
+    7: "Waiting For"
+
+  # Projects strictly forbidden as classification targets (defensive fail-closed guard)
+  forbidden_target_projects:
+    - 1 # Inbox itself
+    - 8 # Someday / Maybe
+
+  # Digest display configuration: list of project IDs to include in the pending section,
+  # in the exact display order desired.
+  digest_project_order:
+    - 1 # Inbox
+    - 5 # Single Action
+    - 6 # Project
+    - 7 # Waiting For
+
+# LLM Classification & Insight Provider
+llm:
+  # Command template to execute LLM.
+  # Use {prompt} placeholder where prompt string or file content is injected.
+  # The command MUST output raw JSON to stdout for classification.
+  # Example 1 (Antigravity CLI wrapper):
+  #   command: "./examples/agy-run.sh -p \"{prompt}\""
+  # Example 2 (OpenAI-compatible curl wrapper):
+  #   command: "./examples/openai-curl.sh \"{prompt}\""
+  command: "./examples/openai-curl.sh \"{prompt}\""
+  timeout_seconds: 240
+
+# ActivityWatch Screen Time Integration (Optional)
+activitywatch:
+  enabled: false # Set to true to include screen time summary in evening digest
+  client_bin: "aw-client"
+  # Directory containing app-breakdown.txt and title-breakdown.txt queries
+  queries_dir: "/path/to/aw-client/queries"
+  # Background / idle applications to exclude from active screen time (comma-separated or list)
+  background_apps:
+    - "cs2"
+    - "steam"
+    - "screensaver"
+
+# Notification Delivery (Optional)
+notifier:
+  # Notification channel: "none" (prints to stdout/backup file) | "himalaya" (CLI mail sender)
+  type: "none"
+
+  # Himalaya email settings (active only when type is "himalaya")
+  himalaya:
+    bin: "himalaya"
+    account: "default"
+    mail_from: "butler@example.com"
+    mail_to: "user@example.com"
+
+# Local backup and logging
+backup:
+  enabled: true
+  file_path: "/tmp/vikunja-ai-butler-last.txt"

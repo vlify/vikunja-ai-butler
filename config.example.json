@@ -1,0 +1,39 @@
+{
+  "timezone": "Asia/Shanghai",
+  "vikunja": {
+    "timeout_seconds": 30
+  },
+  "gtd": {
+    "inbox_project_id": 1,
+    "allowed_target_projects": {
+      "5": "Single Action",
+      "6": "Project",
+      "7": "Waiting For"
+    },
+    "forbidden_target_projects": [1, 8],
+    "digest_project_order": [1, 5, 6, 7]
+  },
+  "llm": {
+    "command": "./examples/openai-curl.sh \"{prompt}\"",
+    "timeout_seconds": 240
+  },
+  "activitywatch": {
+    "enabled": false,
+    "client_bin": "aw-client",
+    "queries_dir": "/path/to/aw-client/queries",
+    "background_apps": ["cs2", "steam", "screensaver"]
+  },
+  "notifier": {
+    "type": "none",
+    "himalaya": {
+      "bin": "himalaya",
+      "account": "default",
+      "mail_from": "butler@example.com",
+      "mail_to": "user@example.com"
+    }
+  },
+  "backup": {
+    "enabled": true,
+    "file_path": "/tmp/vikunja-ai-butler-last.txt"
+  }
+}
