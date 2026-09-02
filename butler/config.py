@@ -85,12 +85,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "notifier": {
         "type": "none",
-        "himalaya": {
-            "bin": "himalaya",
-            "account": "default",
-            "mail_from": "",
-            "mail_to": "",
-        },
+        "account": "default",
+        "from": "",
+        "to": "",
+        "bin": "himalaya",
     },
     "backup": {
         "enabled": True,

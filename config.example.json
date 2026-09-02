@@ -25,12 +25,9 @@
   },
   "notifier": {
     "type": "none",
-    "himalaya": {
-      "bin": "himalaya",
-      "account": "default",
-      "mail_from": "butler@example.com",
-      "mail_to": "user@example.com"
-    }
+    "account": "default",
+    "from": "butler@example.com",
+    "to": "user@example.com"
   },
   "backup": {
     "enabled": true,

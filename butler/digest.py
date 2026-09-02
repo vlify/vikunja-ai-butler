@@ -296,32 +296,50 @@ def build_digest_ai_insight(
 
 
 def send_himalaya_email(
-    himalaya_cfg: Dict[str, Any],
+    notifier_cfg: Dict[str, Any],
     subject: str,
     body: str,
 ) -> None:
     """
     Send digest email via Himalaya CLI using RFC 5322 MIME format.
+    Generates EML with email.policy.SMTP (CRLF line endings and Base64 wrapping).
     """
+    import shutil
     from email.message import EmailMessage
     from email.policy import SMTP
 
-    mail_from = himalaya_cfg.get("mail_from", "")
-    mail_to = himalaya_cfg.get("mail_to", "")
-    account = himalaya_cfg.get("account", "default")
-    bin_path = himalaya_cfg.get("bin", "himalaya")
+    h_nested = notifier_cfg.get("himalaya", {}) if isinstance(notifier_cfg.get("himalaya"), dict) else {}
+    mail_from = (
+        notifier_cfg.get("from")
+        or notifier_cfg.get("mail_from")
+        or h_nested.get("from")
+        or h_nested.get("mail_from")
+        or ""
+    )
+    mail_to = (
+        notifier_cfg.get("to")
+        or notifier_cfg.get("mail_to")
+        or h_nested.get("to")
+        or h_nested.get("mail_to")
+        or ""
+    )
+    account = notifier_cfg.get("account") or h_nested.get("account") or "default"
+    bin_path = notifier_cfg.get("bin") or h_nested.get("bin") or "himalaya"
 
     if not mail_from or not mail_to:
-        raise ValueError("mail_from and mail_to must be configured in notifier.himalaya.")
+        raise ValueError("Both 'from' and 'to' must be configured for notifier.himalaya.")
 
-    msg = EmailMessage(policy=SMTP)
+    if not shutil.which(bin_path) and not os.path.exists(bin_path):
+        raise FileNotFoundError(f"Himalaya binary '{bin_path}' not found.")
+
+    msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = mail_from
     msg["To"] = mail_to
-    msg.set_content(body, charset="utf-8")
+    msg.set_content(body, subtype="plain", charset="utf-8")
 
     with tempfile.NamedTemporaryFile("wb", suffix=".eml", delete=False) as tf:
-        tf.write(msg.as_bytes())
+        tf.write(msg.as_bytes(policy=SMTP))
         eml_path = tf.name
 
     try:
@@ -329,10 +347,14 @@ def send_himalaya_email(
         cmd = [bin_path, "message", "send", "--account", account, "--", eml_path]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
         if res.returncode != 0:
-            raise RuntimeError(f"Himalaya send failed (exit {res.returncode}): {res.stderr.strip()}")
+            err_msg = res.stderr.strip() or res.stdout.strip()
+            raise RuntimeError(f"Himalaya send failed (exit {res.returncode}): {err_msg}")
     finally:
         if os.path.exists(eml_path):
-            os.remove(eml_path)
+            try:
+                os.remove(eml_path)
+            except OSError:
+                pass
 
 
 def run_digest(
@@ -460,12 +482,23 @@ def run_digest(
     notifier_cfg = cfg.get("notifier", {})
     n_type = notifier_cfg.get("type")
     if n_type == "himalaya":
-        h_cfg = notifier_cfg.get("himalaya", {})
+        h_nested = notifier_cfg.get("himalaya", {}) if isinstance(notifier_cfg.get("himalaya"), dict) else {}
+        mail_to = (
+            notifier_cfg.get("to")
+            or notifier_cfg.get("mail_to")
+            or h_nested.get("to")
+            or h_nested.get("mail_to")
+            or ""
+        )
+        account = notifier_cfg.get("account") or h_nested.get("account") or "default"
         try:
-            send_himalaya_email(h_cfg, subject=report_title, body=full_report)
-            print(f"[OK] Daily digest successfully sent via Himalaya to {h_cfg.get('mail_to')}")
+            send_himalaya_email(notifier_cfg, subject=report_title, body=full_report)
+            print(f"[OK] Daily digest successfully sent via Himalaya to {mail_to} (account: {account})")
+            return 0
         except Exception as e:
             print(f"[FAIL] Notification delivery failed: {e}", file=sys.stderr)
+            if backup_path:
+                print(f"[INFO] Report is safely preserved at backup file: {backup_path}", file=sys.stderr)
             return 1
     else:
         print(full_report)

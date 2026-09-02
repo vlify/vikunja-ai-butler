@@ -42,6 +42,9 @@ tmp/
 *.tmp
 *.eml
 
+# Merge and local planning specs
+SPEC-*.md
+
 # OS / Editor
 .DS_Store
 .idea/

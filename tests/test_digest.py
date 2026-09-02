@@ -140,5 +140,98 @@ class TestDigest(unittest.TestCase):
                 os.remove(backup_file)
 
 
+    def test_send_himalaya_email_success(self):
+        from unittest.mock import patch, MagicMock
+        from butler.digest import send_himalaya_email
+
+        cfg = {
+            "type": "himalaya",
+            "account": "qq",
+            "from": "bot@example.com",
+            "to": "user@example.com",
+            "bin": "himalaya",
+        }
+
+        with patch("shutil.which", return_value="/usr/bin/himalaya"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="OK", stderr="")
+                send_himalaya_email(cfg, "Test Subject", "Test Body Content")
+
+                self.assertEqual(mock_run.call_count, 1)
+                cmd = mock_run.call_args[0][0]
+                self.assertEqual(cmd[0], "himalaya")
+                self.assertEqual(cmd[1:5], ["message", "send", "--account", "qq"])
+                self.assertEqual(cmd[5], "--")
+                self.assertTrue(cmd[6].endswith(".eml"))
+
+    def test_send_himalaya_email_nested_config_compatibility(self):
+        from unittest.mock import patch, MagicMock
+        from butler.digest import send_himalaya_email
+
+        nested_cfg = {
+            "type": "himalaya",
+            "himalaya": {
+                "account": "work",
+                "mail_from": "nested_from@example.com",
+                "mail_to": "nested_to@example.com",
+                "bin": "custom-himalaya",
+            },
+        }
+
+        with patch("shutil.which", return_value="/usr/local/bin/custom-himalaya"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="Sent", stderr="")
+                send_himalaya_email(nested_cfg, "Nested Subject", "Nested Body")
+
+                cmd = mock_run.call_args[0][0]
+                self.assertEqual(cmd[0], "custom-himalaya")
+                self.assertEqual(cmd[3], "--account")
+                self.assertEqual(cmd[4], "work")
+
+    def test_run_digest_himalaya_failure_fallback_and_backup(self):
+        from unittest.mock import patch, MagicMock
+
+        done_tasks = [{"id": 1, "title": "Done task", "done": True, "done_at": "2026-09-02T10:00:00Z"}]
+        client = MockDigestVikunjaClient([], done_tasks)
+
+        with tempfile.NamedTemporaryFile("w", delete=False) as tf:
+            backup_file = tf.name
+
+        try:
+            os.environ["BACKUP_FILE"] = backup_file
+            mock_cfg = {
+                "timezone": "Asia/Shanghai",
+                "gtd": {"inbox_project_id": 1, "allowed_target_projects": {1: "Inbox"}, "digest_project_order": [1]},
+                "backup": {"enabled": True, "file_path": backup_file},
+                "notifier": {
+                    "type": "himalaya",
+                    "account": "qq",
+                    "from": "bot@example.com",
+                    "to": "user@example.com",
+                },
+            }
+
+            with patch("butler.digest.load_config", return_value=mock_cfg):
+                with patch("shutil.which", return_value="/usr/bin/himalaya"):
+                    with patch("subprocess.run") as mock_run:
+                        # Simulate himalaya network or auth error
+                        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="SMTP error: timeout")
+                        ret = run_digest(dry_run=False, target_date="2026-09-02", client=client)
+
+                        # Must return non-zero exit code on failure
+                        self.assertNotEqual(ret, 0)
+
+                        # Backup file must still exist and contain the report
+                        self.assertTrue(os.path.exists(backup_file))
+                        with open(backup_file, "r", encoding="utf-8") as bf:
+                            content = bf.read()
+                        self.assertIn("🌙 晚间总结 · 2026-09-02", content)
+                        self.assertIn("Done task", content)
+        finally:
+            if os.path.exists(backup_file):
+                os.remove(backup_file)
+
+
 if __name__ == "__main__":
     unittest.main()
+

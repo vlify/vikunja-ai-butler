@@ -65,13 +65,10 @@ activitywatch:
 notifier:
   # Notification channel: "none" (prints to stdout/backup file) | "himalaya" (CLI mail sender)
   type: "none"
-
-  # Himalaya email settings (active only when type is "himalaya")
-  himalaya:
-    bin: "himalaya"
-    account: "default"
-    mail_from: "butler@example.com"
-    mail_to: "user@example.com"
+  account: "default"
+  from: "butler@example.com"
+  to: "user@example.com"
+  # bin: "himalaya" # Optional custom binary path
 
 # Local backup and logging
 backup:
