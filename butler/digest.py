@@ -26,6 +26,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple
 
+# Ensure project root is in sys.path for direct CLI and systemd invocation
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from butler.config import load_config
 from butler.vikunja_client import VikunjaClient, VikunjaAPIError
 from butler.llm_runner import LLMRunner, LLMError, LLMTimeoutError
