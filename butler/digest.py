@@ -332,24 +332,30 @@ def build_digest_ai_insight(
     aw_section: str,
 ) -> str:
     """
-    Generate AI insight paragraph with graceful fallback on timeout/failure.
+    Generate integrated AI insight paragraph linking completed tasks and screen time allocation.
+    Gracefully degrades on timeout or failure.
     """
     if llm is None:
         return ""
 
-    prompt = f"""你是一个贴心、客观、敏锐的个人数字化助理。根据用户今天的任务完成情况、待办清单和屏幕时间（如有），生成一段约150字以内的晚间洞察与简短点评。
+    prompt = f"""你是一个客观、敏锐、富于洞察力的个人数字化效能管家。
+请将用户今天的【今日已完成任务】与【ActivityWatch 屏幕时间分配】两部分数据深度结合起来，进行融为一体的晚间效能与精力复盘（约 150-200 字）。
 
-要求：
-1. 语言亲切诚恳，富于建设性，避免说教和空话。
-2. 总结今天的执行焦点，指出未竟事项中的优先事项。
-3. 若屏幕时间较长或较零碎，给出合理的劳逸建议。
+核心要求：
+1. 【深度交叉印证，严禁机械割裂】：
+   - 绝不要把“完成了什么”和“屏幕时间几小时”拆成两半分别叙述！
+   - 必须分析【时间投入】与【实际产出】的映射关系（时间投产比）：观察屏幕上的核心应用时长（如终端、开发环境、浏览器、文档等）是否真实印证并支撑了今日完成的硬核成果。
+2. 【洞察专注度与节奏】：
+   - 若高耗时集中于主力生产力工具且拿下关键交付，给予精准的专注度肯定；
+   - 若发现时间投入与产出存在偏差（例如长时间处于配置/排查泥潭，或出现零碎应用切换），敏锐客观地指出真实的精力消耗点。
+3. 【文风要求】：
+   - 亲切诚恳、犀利敏锐，严禁官话、空话与说教。
+   - 专注于今天真实的“付出与斩获”，不唠叨未竟事项。
 
 今日汇总数据：
 日期：{target_date}
 
 {completed_section}
-
-{pending_section}
 
 {aw_section}
 """
