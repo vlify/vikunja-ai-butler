@@ -328,7 +328,6 @@ def build_digest_ai_insight(
     llm: Optional[LLMRunner],
     target_date: str,
     completed_section: str,
-    pending_section: str,
     aw_section: str,
 ) -> str:
     """
@@ -525,12 +524,11 @@ def run_digest(
         llm=llm,
         target_date=target_date,
         completed_section=completed_section,
-        pending_section=pending_section,
         aw_section=aw_section,
     )
 
-    # Assemble complete report
-    sections = [f"# {report_title}", completed_section, pending_section]
+    # Assemble complete report — 晚间总结仅列已完成,不含待办
+    sections = [f"# {report_title}", completed_section]
     if aw_section:
         sections.append(aw_section)
     if ai_section:

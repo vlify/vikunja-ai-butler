@@ -125,12 +125,12 @@ class TestDigest(unittest.TestCase):
     def test_ai_insight_fallback_on_llm_failure(self):
         # LLM Timeout
         llm_timeout = MockDigestLLMRunner(fail_with=LLMTimeoutError("timed out"))
-        out = build_digest_ai_insight(llm_timeout, "2026-09-02", "comp", "pend", "aw")
+        out = build_digest_ai_insight(llm_timeout, "2026-09-02", "comp", "aw")
         self.assertIn("⚠️ AI 点评生成失败 (退出状态码: 124)", out)
 
         # LLM Non-zero exit code
         llm_fail = MockDigestLLMRunner(fail_with=LLMExecutionError("failed", exit_code=1))
-        out2 = build_digest_ai_insight(llm_fail, "2026-09-02", "comp", "pend", "aw")
+        out2 = build_digest_ai_insight(llm_fail, "2026-09-02", "comp", "aw")
         self.assertIn("⚠️ AI 点评生成失败 (退出状态码: 1)", out2)
 
     def test_run_digest_end_to_end_dry_run(self):
@@ -162,7 +162,8 @@ class TestDigest(unittest.TestCase):
                 content = f.read()
             self.assertIn("🌙 晚间总结 · 2026-09-02(周三)", content)
             self.assertIn("Buy groceries", content)
-            self.assertIn("Review pull request", content)
+            # 晚间总结仅列已完成,不应包含待办
+            self.assertNotIn("Review pull request", content)
             self.assertIn("Great progress today!", content)
         finally:
             if os.path.exists(backup_file):
