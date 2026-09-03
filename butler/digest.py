@@ -98,27 +98,63 @@ def format_pending_tasks(
 ) -> str:
     """
     Filter and format active GTD pending tasks grouped by project.
+    Preserves hierarchical subtask relationships (indents subtasks under parent).
     """
-    grouped: Dict[int, List[str]] = {}
+    task_map: Dict[int, Dict[str, Any]] = {
+        t["id"]: t for t in tasks if isinstance(t, dict) and "id" in t
+    }
+    parent_to_children: Dict[int, List[int]] = {}
+    child_to_parent: Dict[int, int] = {}
 
     for t in tasks:
-        if not isinstance(t, dict):
+        if not isinstance(t, dict) or t.get("done", False):
             continue
-        if not t.get("done", False):
-            pid = t.get("project_id")
-            if pid in allowed_projects:
-                grouped.setdefault(pid, []).append(t.get("title", "未命名任务").strip())
-
-    if not grouped:
-        return "## 📋 今日待办\n\n（今日无未完成待办事项）"
+        tid = t.get("id")
+        if not tid:
+            continue
+        related = t.get("related_tasks") or {}
+        parents = related.get("parenttask") or []
+        if parents and isinstance(parents, list):
+            p_id = parents[0].get("id")
+            if p_id and p_id in task_map:
+                child_to_parent[tid] = p_id
+                parent_to_children.setdefault(p_id, []).append(tid)
 
     lines = ["## 📋 今日待办"]
+    has_any_pending = False
+
     for pid in project_order:
-        if pid in grouped and grouped[pid]:
-            pname = allowed_projects.get(pid, f"Project {pid}")
-            lines.append(f"\n### {pname}")
-            for item in grouped[pid]:
-                lines.append(f"- [ ] {item}")
+        pname = allowed_projects.get(pid)
+        if not pname:
+            continue
+        proj_tasks = [
+            t for t in tasks
+            if isinstance(t, dict) and not t.get("done", False) and t.get("project_id") == pid
+        ]
+        if not proj_tasks:
+            continue
+
+        has_any_pending = True
+        lines.append(f"\n### {pname}")
+
+        for t in proj_tasks:
+            tid = t.get("id")
+            if tid in child_to_parent:
+                # Subtask will be rendered nested under its parent
+                continue
+            title = t.get("title", "未命名任务").strip()
+            lines.append(f"- [ ] {title}")
+
+            # Render child subtasks indented
+            if tid in parent_to_children:
+                for cid in parent_to_children[tid]:
+                    child = task_map.get(cid)
+                    if child and not child.get("done", False):
+                        c_title = child.get("title", "未命名任务").strip()
+                        lines.append(f"  - [ ] {c_title}")
+
+    if not has_any_pending:
+        return "## 📋 今日待办\n\n（今日无未完成待办事项）"
 
     return "\n".join(lines)
 

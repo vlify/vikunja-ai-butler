@@ -19,10 +19,27 @@ class MockVikunjaClient(VikunjaClient):
         self._tasks = tasks
         self.updates: List[Dict[str, Any]] = []
         self.relations: List[Dict[str, Any]] = []
+        self.created: List[Dict[str, Any]] = []
         self.fail_add_relation = False
 
     def get_tasks(self, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return self._tasks
+
+    def create_task(
+        self,
+        project_id: int,
+        title: str,
+        description: Optional[str] = None,
+        parent_task_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        call = {
+            "project_id": project_id,
+            "title": title,
+            "description": description,
+            "parent_task_id": parent_task_id,
+        }
+        self.created.append(call)
+        return {"id": 1000 + len(self.created), "title": title}
 
     def update_task(
         self,
@@ -30,12 +47,14 @@ class MockVikunjaClient(VikunjaClient):
         project_id: Optional[int] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
+        parent_task_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         call = {
             "task_id": task_id,
             "project_id": project_id,
             "title": title,
             "description": description,
+            "parent_task_id": parent_task_id,
         }
         self.updates.append(call)
         return {"id": task_id}
@@ -312,29 +331,69 @@ class TestClassifyAttach(unittest.TestCase):
 
         ret = run_classify(dry_run=False, client=client, llm=llm)
         self.assertEqual(ret, 0)
-        self.assertEqual(len(client.relations), 1)
-        rel = client.relations[0]
-        self.assertEqual(rel["task_id"], 201)
-        self.assertEqual(rel["other_task_id"], 102)
-        self.assertEqual(rel["relation_kind"], "subtask")
-
         self.assertEqual(len(client.updates), 1)
         up = client.updates[0]
         self.assertEqual(up["task_id"], 102)
         self.assertEqual(up["project_id"], 6)
+        self.assertEqual(up["parent_task_id"], 201)
 
-    def test_run_classify_attach_relation_api_failure_is_fail_closed(self):
-        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201, "expanded_title": null, "expanded_description": null}]'
+    def test_run_classify_spawn_calls_api_correctly(self):
+        raw = '[{"id": 201, "action": "spawn", "subtasks": ["Step 1: Install", "Step 2: Config"]}]'
         all_tasks = self.sample_inbox + [
             {"id": 201, "title": "Learn Spark", "project_id": 6, "done": False},
         ]
         client = MockVikunjaClient(all_tasks)
-        client.fail_add_relation = True
         llm = MockLLMRunner(output_text=raw)
 
         ret = run_classify(dry_run=False, client=client, llm=llm)
-        self.assertNotEqual(ret, 0)
-        self.assertEqual(len(client.updates), 0)
+        self.assertEqual(ret, 0)
+        self.assertEqual(len(client.created), 2)
+        c1, c2 = client.created
+        self.assertEqual(c1["title"], "Step 1: Install")
+        self.assertEqual(c1["parent_task_id"], 201)
+        self.assertEqual(c1["project_id"], 6)
+        self.assertEqual(c2["title"], "Step 2: Config")
+        self.assertEqual(c2["parent_task_id"], 201)
+
+    def test_run_classify_refine_calls_api_correctly(self):
+        raw = '[{"id": 201, "action": "refine", "expanded_title": "Setup Spark Cluster", "expanded_description": "原条目: Learn Spark\\nInstall single node cluster."}]'
+        all_tasks = self.sample_inbox + [
+            {"id": 201, "title": "Learn Spark", "project_id": 6, "done": False},
+        ]
+        client = MockVikunjaClient(all_tasks)
+        llm = MockLLMRunner(output_text=raw)
+
+        ret = run_classify(dry_run=False, client=client, llm=llm)
+        self.assertEqual(ret, 0)
+        self.assertEqual(len(client.updates), 1)
+        up = client.updates[0]
+        self.assertEqual(up["task_id"], 201)
+        self.assertEqual(up["title"], "Setup Spark Cluster")
+        self.assertIn("原条目: Learn Spark", up["description"])
+
+    def test_parse_and_validate_active_quota_exceeded(self):
+        # 6 mutations on active tasks when max is 5
+        raw = """
+        [
+          {"id": 201, "action": "spawn", "subtasks": ["S1"]},
+          {"id": 202, "action": "spawn", "subtasks": ["S2"]},
+          {"id": 203, "action": "spawn", "subtasks": ["S3"]},
+          {"id": 204, "action": "spawn", "subtasks": ["S4"]},
+          {"id": 205, "action": "spawn", "subtasks": ["S5"]},
+          {"id": 206, "action": "spawn", "subtasks": ["S6"]}
+        ]
+        """
+        active_tasks = [{"id": i, "title": f"T{i}", "project_id": 6} for i in range(201, 207)]
+        with self.assertRaises(ValueError) as ctx:
+            parse_and_validate_llm_output(
+                raw,
+                inbox_tasks=[],
+                allowed_projects=self.allowed_projects,
+                forbidden_projects=self.forbidden_projects,
+                active_tasks=active_tasks,
+                max_active_mutations=5,
+            )
+        self.assertIn("[FAIL-CLOSED] Batch quota exceeded", str(ctx.exception))
 
     def test_dry_run_attach(self):
         raw = '[{"id": 102, "action": "attach", "parent_task_id": 201}]'

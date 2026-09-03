@@ -123,17 +123,42 @@ class VikunjaClient:
         all_tasks = self.get_tasks(project_id)
         return [t for t in all_tasks if isinstance(t, dict) and t.get("done") is True]
 
+    def create_task(
+        self,
+        project_id: int,
+        title: str,
+        description: Optional[str] = None,
+        parent_task_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new task in project_id. If parent_task_id is given, links as subtask.
+        Vikunja endpoint: PUT /api/v1/projects/{project_id}/tasks
+        """
+        payload: Dict[str, Any] = {
+            "title": str(title).strip()
+        }
+        if description is not None:
+            payload["description"] = str(description).strip()
+        if parent_task_id is not None:
+            payload["related_tasks"] = {
+                "parenttask": [{"id": int(parent_task_id)}]
+            }
+        endpoint = f"/api/v1/projects/{int(project_id)}/tasks"
+        res = self._request(endpoint, method="PUT", payload=payload)
+        return res if isinstance(res, dict) else {}
+
     def update_task(
         self,
         task_id: int,
         project_id: Optional[int] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
+        parent_task_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Update a task's destination project or expanded text.
+        Update a task's destination project, expanded text, or parent task link.
         ENFORCES LEAST-PRIVILEGE MUTATION:
-        Only project_id, title, description are allowed. 'done' is rejected.
+        Only project_id, title, description, parent_task_id are allowed. 'done' is rejected.
         """
         payload: Dict[str, Any] = {}
         if project_id is not None:
@@ -142,6 +167,10 @@ class VikunjaClient:
             payload["title"] = str(title)
         if description is not None:
             payload["description"] = str(description)
+        if parent_task_id is not None:
+            payload["related_tasks"] = {
+                "parenttask": [{"id": int(parent_task_id)}]
+            }
 
         if not payload:
             return {}

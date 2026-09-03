@@ -83,6 +83,35 @@ class TestDigest(unittest.TestCase):
         self.assertNotIn("Someday item", text)
         self.assertNotIn("Done item", text)
 
+    def test_pending_tasks_hierarchical_subtask_nesting(self):
+        # Task 100 has two subtasks: 101 and 102
+        tasks = [
+            {"id": 100, "title": "Main Project", "project_id": 6, "done": False},
+            {
+                "id": 101,
+                "title": "Subtask Alpha",
+                "project_id": 6,
+                "done": False,
+                "related_tasks": {"parenttask": [{"id": 100}]},
+            },
+            {
+                "id": 102,
+                "title": "Subtask Beta",
+                "project_id": 6,
+                "done": False,
+                "related_tasks": {"parenttask": [{"id": 100}]},
+            },
+            {"id": 200, "title": "Independent Task", "project_id": 6, "done": False},
+        ]
+        allowed = {6: "Project"}
+        order = [6]
+
+        text = format_pending_tasks(tasks, allowed, order)
+        self.assertIn("- [ ] Main Project", text)
+        self.assertIn("  - [ ] Subtask Alpha", text)
+        self.assertIn("  - [ ] Subtask Beta", text)
+        self.assertIn("- [ ] Independent Task", text)
+
     def test_empty_data_sources_graceful_degradation(self):
         # Empty completed
         comp_text, comp_count = format_completed_tasks([], "2026-09-02")
