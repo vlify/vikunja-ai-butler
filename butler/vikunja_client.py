@@ -149,3 +149,23 @@ class VikunjaClient:
         # POST /api/v1/tasks/{id} is standard in Vikunja for updates
         endpoint = f"/api/v1/tasks/{task_id}"
         return self._request(endpoint, method="POST", payload=payload)
+
+    def add_relation(
+        self,
+        task_id: int,
+        other_task_id: int,
+        relation_kind: str = "subtask",
+    ) -> Dict[str, Any]:
+        """
+        Create a relation between task_id and other_task_id.
+        Vikunja endpoint: PUT /api/v1/tasks/{task_id}/relations
+        Payload: {"other_task_id": other_task_id, "relation_kind": relation_kind}
+        """
+        endpoint = f"/api/v1/tasks/{task_id}/relations"
+        payload = {
+            "other_task_id": int(other_task_id),
+            "relation_kind": str(relation_kind),
+        }
+        res = self._request(endpoint, method="PUT", payload=payload)
+        return res if isinstance(res, dict) else {}
+

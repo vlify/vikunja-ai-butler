@@ -18,6 +18,8 @@ class MockVikunjaClient(VikunjaClient):
         super().__init__(base_url="http://127.0.0.1:3456", token="mock_token")
         self._tasks = tasks
         self.updates: List[Dict[str, Any]] = []
+        self.relations: List[Dict[str, Any]] = []
+        self.fail_add_relation = False
 
     def get_tasks(self, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return self._tasks
@@ -37,6 +39,23 @@ class MockVikunjaClient(VikunjaClient):
         }
         self.updates.append(call)
         return {"id": task_id}
+
+    def add_relation(
+        self,
+        task_id: int,
+        other_task_id: int,
+        relation_kind: str = "subtask",
+    ) -> Dict[str, Any]:
+        if self.fail_add_relation:
+            from butler.vikunja_client import VikunjaAPIError
+            raise VikunjaAPIError("Simulated add_relation error")
+        call = {
+            "task_id": task_id,
+            "other_task_id": other_task_id,
+            "relation_kind": relation_kind,
+        }
+        self.relations.append(call)
+        return {"id": 1, "task_id": task_id, "other_task_id": other_task_id}
 
 
 class MockLLMRunner(LLMRunner):
@@ -197,6 +216,137 @@ class TestClassify(unittest.TestCase):
         llm_err = MockLLMRunner(fail_with=LLMExecutionError("failed", exit_code=1))
         ret_err = run_classify(client=client, llm=llm_err)
         self.assertEqual(ret_err, 1)
+        self.assertEqual(len(client.updates), 0)
+
+
+class TestClassifyAttach(unittest.TestCase):
+    def setUp(self):
+        self.allowed_projects = {
+            5: "Single Action",
+            6: "Project",
+            7: "Waiting For",
+        }
+        self.forbidden_projects = {1, 8}
+        self.sample_inbox = [
+            {"id": 101, "title": "Buy coffee beans", "description": "", "project_id": 1, "done": False},
+            {"id": 102, "title": "Subtask for spark", "description": "", "project_id": 1, "done": False},
+        ]
+        self.parent_candidates = [
+            {"id": 201, "title": "Learn Spark", "project_id": 6, "project_name": "Project"},
+            {"id": 202, "title": "Office chore", "project_id": 5, "project_name": "Single Action"},
+        ]
+
+    def test_parse_valid_attach_action(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201, "expanded_title": null, "expanded_description": null}]'
+        plan = parse_and_validate_llm_output(
+            raw,
+            self.sample_inbox,
+            self.allowed_projects,
+            self.forbidden_projects,
+            parent_candidates=self.parent_candidates,
+        )
+        self.assertEqual(len(plan), 1)
+        item = plan[0]
+        self.assertEqual(item["id"], 102)
+        self.assertEqual(item["action"], "attach")
+        self.assertEqual(item["parent_task_id"], 201)
+        self.assertEqual(item["project_id"], 6)
+        self.assertEqual(item["project_name"], "Project")
+
+    def test_parse_attach_missing_parent_task_id(self):
+        raw = '[{"id": 102, "action": "attach"}]'
+        with self.assertRaises(ValueError) as ctx:
+            parse_and_validate_llm_output(
+                raw,
+                self.sample_inbox,
+                self.allowed_projects,
+                self.forbidden_projects,
+                parent_candidates=self.parent_candidates,
+            )
+        self.assertIn("missing 'parent_task_id'", str(ctx.exception))
+
+    def test_parse_attach_invalid_parent_task_id(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 999}]'
+        with self.assertRaises(ValueError) as ctx:
+            parse_and_validate_llm_output(
+                raw,
+                self.sample_inbox,
+                self.allowed_projects,
+                self.forbidden_projects,
+                parent_candidates=self.parent_candidates,
+            )
+        self.assertIn("not in candidate parent tasks", str(ctx.exception))
+
+    def test_parse_attach_with_forbidden_project_id(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201, "project_id": 6}]'
+        with self.assertRaises(ValueError) as ctx:
+            parse_and_validate_llm_output(
+                raw,
+                self.sample_inbox,
+                self.allowed_projects,
+                self.forbidden_projects,
+                parent_candidates=self.parent_candidates,
+            )
+        self.assertIn("must NOT provide 'project_id'", str(ctx.exception))
+
+    def test_parse_attach_parent_is_inbox_task(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 101}]'
+        candidates_with_inbox = self.parent_candidates + [{"id": 101, "title": "Buy coffee", "project_id": 1}]
+        with self.assertRaises(ValueError) as ctx:
+            parse_and_validate_llm_output(
+                raw,
+                self.sample_inbox,
+                self.allowed_projects,
+                self.forbidden_projects,
+                parent_candidates=candidates_with_inbox,
+            )
+        self.assertIn("cannot be an inbox task itself", str(ctx.exception))
+
+    def test_run_classify_attach_calls_api_correctly(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201, "expanded_title": null, "expanded_description": null}]'
+        all_tasks = self.sample_inbox + [
+            {"id": 201, "title": "Learn Spark", "project_id": 6, "done": False},
+        ]
+        client = MockVikunjaClient(all_tasks)
+        llm = MockLLMRunner(output_text=raw)
+
+        ret = run_classify(dry_run=False, client=client, llm=llm)
+        self.assertEqual(ret, 0)
+        self.assertEqual(len(client.relations), 1)
+        rel = client.relations[0]
+        self.assertEqual(rel["task_id"], 201)
+        self.assertEqual(rel["other_task_id"], 102)
+        self.assertEqual(rel["relation_kind"], "subtask")
+
+        self.assertEqual(len(client.updates), 1)
+        up = client.updates[0]
+        self.assertEqual(up["task_id"], 102)
+        self.assertEqual(up["project_id"], 6)
+
+    def test_run_classify_attach_relation_api_failure_is_fail_closed(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201, "expanded_title": null, "expanded_description": null}]'
+        all_tasks = self.sample_inbox + [
+            {"id": 201, "title": "Learn Spark", "project_id": 6, "done": False},
+        ]
+        client = MockVikunjaClient(all_tasks)
+        client.fail_add_relation = True
+        llm = MockLLMRunner(output_text=raw)
+
+        ret = run_classify(dry_run=False, client=client, llm=llm)
+        self.assertNotEqual(ret, 0)
+        self.assertEqual(len(client.updates), 0)
+
+    def test_dry_run_attach(self):
+        raw = '[{"id": 102, "action": "attach", "parent_task_id": 201}]'
+        all_tasks = self.sample_inbox + [
+            {"id": 201, "title": "Learn Spark", "project_id": 6, "done": False},
+        ]
+        client = MockVikunjaClient(all_tasks)
+        llm = MockLLMRunner(output_text=raw)
+
+        ret = run_classify(dry_run=True, client=client, llm=llm)
+        self.assertEqual(ret, 0)
+        self.assertEqual(len(client.relations), 0)
         self.assertEqual(len(client.updates), 0)
 
 

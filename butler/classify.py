@@ -36,7 +36,11 @@ from butler.vikunja_client import VikunjaClient, VikunjaAPIError
 from butler.llm_runner import LLMRunner, LLMError, LLMTimeoutError
 
 
-def build_prompt(tasks: List[Dict[str, Any]], allowed_projects: Dict[int, str]) -> str:
+def build_prompt(
+    tasks: List[Dict[str, Any]],
+    allowed_projects: Dict[int, str],
+    parent_candidates: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     """
     Assemble the GTD classification prompt with strict JSON output schema.
     """
@@ -48,25 +52,39 @@ def build_prompt(tasks: List[Dict[str, Any]], allowed_projects: Dict[int, str]) 
 
     target_defs = "\n".join([f"- {pid}: {name}" for pid, name in allowed_projects.items()])
 
-    prompt = f"""You are a professional GTD task classifier. Classify the following tasks from the Inbox into the most appropriate target list.
+    parent_section = ""
+    if parent_candidates:
+        parent_lines = [
+            f"- ID: {p['id']} | Project: {p.get('project_name', allowed_projects.get(p.get('project_id', 0), 'Unknown'))} | Title: {p['title']}"
+            for p in parent_candidates
+        ]
+        parent_section = f"""
+Candidate parent tasks (to attach inbox items as subtasks):
+{chr(10).join(parent_lines)}
+"""
 
-Allowed target lists (ONLY classify into one of these):
+    prompt = f"""You are a professional GTD task classifier. Classify the following tasks from the Inbox.
+
+Allowed target lists (for 'move' action):
 {target_defs}
-
+{parent_section}
 Rules:
-1. Moving to unlisted lists or Inbox itself is strictly forbidden.
-2. If a task has insufficient info or should stay in Inbox, DO NOT include it in the output.
-3. NEVER create tasks, NEVER delete tasks, NEVER modify done status. Only return project_id and optional expansion.
-4. Expansion rules:
+1. Two actions are supported:
+   a) "move": Move task to one of the allowed target lists. Requires "project_id".
+   b) "attach": Attach task as a subtask of an existing candidate parent task. Requires "parent_task_id". Do NOT include "project_id" when attaching (it will automatically inherit the parent task's project).
+2. Moving to unlisted lists or Inbox itself is strictly forbidden.
+3. If a task has insufficient info or should stay in Inbox, DO NOT include it in the output.
+4. NEVER create tasks, NEVER delete tasks, NEVER modify done status.
+5. Expansion rules:
    - For vague items lacking clear actionability, output expanded_title and expanded_description (2-3 sentences).
    - expanded_description MUST start on the first line with: 原条目: <original_title>
    - For clear items, expanded_title and expanded_description MUST be null.
-5. Output strict JSON array without Markdown fences or extra commentary.
+6. Output strict JSON array without Markdown fences or extra commentary.
 
 Format:
 [
-  {{"id": 101, "project_id": 5, "expanded_title": null, "expanded_description": null}},
-  {{"id": 102, "project_id": 6, "expanded_title": "Learn Spark Basics", "expanded_description": "原条目: spark\\nStudy Spark architecture and DataFrame API."}}
+  {{"id": 101, "action": "move", "project_id": 5, "expanded_title": null, "expanded_description": null}},
+  {{"id": 102, "action": "attach", "parent_task_id": 16, "expanded_title": null, "expanded_description": null}}
 ]
 
 Tasks to classify:
@@ -80,6 +98,7 @@ def parse_and_validate_llm_output(
     inbox_tasks: List[Dict[str, Any]],
     allowed_projects: Dict[int, str],
     forbidden_projects: Set[int],
+    parent_candidates: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Enforce strict fail-closed validation on LLM JSON output.
@@ -98,6 +117,9 @@ def parse_and_validate_llm_output(
         raise ValueError(f"[FAIL-CLOSED] Root JSON structure is not an array (list): {type(data)}")
 
     valid_task_map = {t["id"]: t["title"] for t in inbox_tasks}
+    valid_parent_map = {p["id"]: p for p in (parent_candidates or [])}
+    inbox_ids = set(valid_task_map.keys())
+
     plan: List[Dict[str, Any]] = []
     seen_ids: Set[int] = set()
 
@@ -110,16 +132,13 @@ def parse_and_validate_llm_output(
             raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} contains forbidden 'done' field: {item}")
 
         task_id = item.get("id")
-        target_pid = item.get("project_id")
-
-        if task_id is None or target_pid is None:
-            raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} missing 'id' or 'project_id': {item}")
+        if task_id is None:
+            raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} missing 'id': {item}")
 
         try:
             task_id = int(task_id)
-            target_pid = int(target_pid)
         except (ValueError, TypeError):
-            raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} 'id' or 'project_id' is not a valid integer: {item}")
+            raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} 'id' is not a valid integer: {item}")
 
         if task_id not in valid_task_map:
             raise ValueError(f"[FAIL-CLOSED] Task ID {task_id} does not belong to current inbox tasks.")
@@ -127,14 +146,63 @@ def parse_and_validate_llm_output(
         if task_id in seen_ids:
             raise ValueError(f"[FAIL-CLOSED] Duplicate task ID {task_id} in LLM output.")
 
-        if target_pid in forbidden_projects:
-            raise ValueError(f"[FAIL-CLOSED] Target project_id {target_pid} is explicitly forbidden.")
+        # Determine action (default 'move' for backward compatibility)
+        action = item.get("action")
+        if action is None:
+            action = "attach" if item.get("parent_task_id") is not None else "move"
 
-        if target_pid not in allowed_projects:
-            raise ValueError(f"[FAIL-CLOSED] Target project_id {target_pid} is not in allowed whitelist: {list(allowed_projects.keys())}")
+        if action not in ("move", "attach"):
+            raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} invalid action '{action}'. Only 'move' or 'attach' allowed.")
 
         seen_ids.add(task_id)
         orig_title = valid_task_map[task_id]
+
+        target_pid = None
+        pname = ""
+        parent_id = None
+        parent_title = None
+
+        if action == "move":
+            target_pid = item.get("project_id")
+            if target_pid is None:
+                raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} missing 'project_id' for 'move' action: {item}")
+            try:
+                target_pid = int(target_pid)
+            except (ValueError, TypeError):
+                raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} 'project_id' is not a valid integer: {item}")
+
+            if target_pid in forbidden_projects:
+                raise ValueError(f"[FAIL-CLOSED] Target project_id {target_pid} is explicitly forbidden.")
+
+            if target_pid not in allowed_projects:
+                raise ValueError(f"[FAIL-CLOSED] Target project_id {target_pid} is not in allowed whitelist: {list(allowed_projects.keys())}")
+
+            pname = allowed_projects[target_pid]
+
+        elif action == "attach":
+            parent_id = item.get("parent_task_id")
+            if parent_id is None:
+                raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} missing 'parent_task_id' for 'attach' action: {item}")
+            try:
+                parent_id = int(parent_id)
+            except (ValueError, TypeError):
+                raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} 'parent_task_id' is not a valid integer: {item}")
+
+            if "project_id" in item and item["project_id"] is not None:
+                raise ValueError(f"[FAIL-CLOSED] Item #{idx+1} 'attach' action must NOT provide 'project_id': {item}")
+
+            if parent_id in inbox_ids:
+                raise ValueError(f"[FAIL-CLOSED] Task ID {task_id} parent_task_id {parent_id} cannot be an inbox task itself.")
+
+            if parent_id not in valid_parent_map:
+                raise ValueError(f"[FAIL-CLOSED] Parent task ID {parent_id} is not in candidate parent tasks.")
+
+            parent_info = valid_parent_map[parent_id]
+            target_pid = parent_info.get("project_id")
+            if target_pid is None:
+                raise ValueError(f"[FAIL-CLOSED] Parent task ID {parent_id} has no valid project_id.")
+            parent_title = parent_info.get("title", "")
+            pname = parent_info.get("project_name", allowed_projects.get(target_pid, f"Project {target_pid}"))
 
         # Rule 2: validate text expansion rules
         exp_title = item.get("expanded_title")
@@ -163,8 +231,11 @@ def parse_and_validate_llm_output(
         plan.append({
             "id": task_id,
             "title": orig_title,
+            "action": action,
             "project_id": target_pid,
-            "project_name": allowed_projects[target_pid],
+            "project_name": pname,
+            "parent_task_id": parent_id,
+            "parent_title": parent_title,
             "expanded_title": final_exp_title,
             "expanded_description": final_exp_desc,
         })
@@ -200,7 +271,7 @@ def run_classify(
             timeout=v_cfg.get("timeout_seconds", 30),
         )
 
-    # Step 1: Fetch tasks and filter inbox
+    # Step 1: Fetch tasks and filter inbox and parent candidates
     try:
         all_tasks = client.get_tasks()
     except VikunjaAPIError as e:
@@ -208,22 +279,33 @@ def run_classify(
         return 1
 
     inbox_tasks = []
+    parent_candidates = []
     for t in all_tasks:
-        if isinstance(t, dict) and not t.get("done", False) and t.get("project_id") == inbox_pid:
+        if not isinstance(t, dict) or t.get("done", False):
+            continue
+        pid = t.get("project_id")
+        if pid == inbox_pid:
             inbox_tasks.append({
                 "id": t.get("id"),
                 "title": t.get("title", "").strip(),
                 "description": t.get("description", "").strip(),
+            })
+        elif pid in allowed_projects:
+            parent_candidates.append({
+                "id": t.get("id"),
+                "title": t.get("title", "").strip(),
+                "project_id": pid,
+                "project_name": allowed_projects[pid],
             })
 
     if not inbox_tasks:
         print("[INBOX] Inbox is empty. No tasks to classify. Exiting cleanly.")
         return 0
 
-    print(f"[INBOX] Found {len(inbox_tasks)} pending inbox tasks. Invoking LLM classifier...")
+    print(f"[INBOX] Found {len(inbox_tasks)} pending inbox tasks and {len(parent_candidates)} candidate parent tasks. Invoking LLM classifier...")
 
     # Step 2: Build prompt and execute LLM
-    prompt = build_prompt(inbox_tasks, allowed_projects)
+    prompt = build_prompt(inbox_tasks, allowed_projects, parent_candidates=parent_candidates)
 
     if llm is None:
         llm_cfg = cfg.get("llm", {})
@@ -247,6 +329,7 @@ def run_classify(
             inbox_tasks=inbox_tasks,
             allowed_projects=allowed_projects,
             forbidden_projects=forbidden_projects,
+            parent_candidates=parent_candidates,
         )
     except ValueError as e:
         print(f"{e}", file=sys.stderr)
@@ -266,37 +349,70 @@ def run_classify(
     for item in plan:
         t_id = item["id"]
         t_title = item["title"]
+        action = item.get("action", "move")
         pid = item["project_id"]
         pname = item["project_name"]
+        parent_id = item.get("parent_task_id")
+        parent_title = item.get("parent_title")
         exp_title = item.get("expanded_title")
         exp_desc = item.get("expanded_description")
 
         moved_ids.add(t_id)
         counts[pid] = counts.get(pid, 0) + 1
 
-        if dry_run:
-            if exp_title:
-                print(f"-> [PLAN MOVE+EXPAND] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
-                print(f"   Expanded title: [{t_title}] -> [{exp_title}]")
-                print(f"   Expanded desc:  {exp_desc}")
+        if action == "attach":
+            if dry_run:
+                if exp_title:
+                    print(f"-> [PLAN ATTACH+EXPAND] Task #{t_id} [{t_title}] => subtask of #{parent_id} [{parent_title}] in [{pname} (ID: {pid})]")
+                    print(f"   Expanded title: [{t_title}] -> [{exp_title}]")
+                    print(f"   Expanded desc:  {exp_desc}")
+                else:
+                    print(f"-> [PLAN ATTACH] Task #{t_id} [{t_title}] => subtask of #{parent_id} [{parent_title}] in [{pname} (ID: {pid})]")
             else:
-                print(f"-> [PLAN MOVE] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
-        else:
-            try:
-                client.update_task(
-                    task_id=t_id,
-                    project_id=pid,
-                    title=exp_title,
-                    description=exp_desc,
-                )
-            except VikunjaAPIError as e:
-                print(f"[FAIL] Failed to update task #{t_id}: {e}", file=sys.stderr)
-                return 1
+                try:
+                    client.add_relation(
+                        task_id=parent_id,
+                        other_task_id=t_id,
+                        relation_kind="subtask",
+                    )
+                    client.update_task(
+                        task_id=t_id,
+                        project_id=pid,
+                        title=exp_title,
+                        description=exp_desc,
+                    )
+                except VikunjaAPIError as e:
+                    print(f"[FAIL] Failed to attach task #{t_id} to parent #{parent_id}: {e}", file=sys.stderr)
+                    return 1
 
-            if exp_title:
-                print(f"[OK] [MOVED+EXPANDED] Task #{t_id} [{t_title}] -> [{exp_title}] => [{pname} (ID: {pid})]")
+                if exp_title:
+                    print(f"[OK] [ATTACHED+EXPANDED] Task #{t_id} [{t_title}] -> [{exp_title}] => subtask of #{parent_id} [{parent_title}] in [{pname} (ID: {pid})]")
+                else:
+                    print(f"[OK] [ATTACHED] Task #{t_id} [{t_title}] => subtask of #{parent_id} [{parent_title}] in [{pname} (ID: {pid})]")
+        else:
+            if dry_run:
+                if exp_title:
+                    print(f"-> [PLAN MOVE+EXPAND] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
+                    print(f"   Expanded title: [{t_title}] -> [{exp_title}]")
+                    print(f"   Expanded desc:  {exp_desc}")
+                else:
+                    print(f"-> [PLAN MOVE] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
             else:
-                print(f"[OK] [MOVED] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
+                try:
+                    client.update_task(
+                        task_id=t_id,
+                        project_id=pid,
+                        title=exp_title,
+                        description=exp_desc,
+                    )
+                except VikunjaAPIError as e:
+                    print(f"[FAIL] Failed to update task #{t_id}: {e}", file=sys.stderr)
+                    return 1
+
+                if exp_title:
+                    print(f"[OK] [MOVED+EXPANDED] Task #{t_id} [{t_title}] -> [{exp_title}] => [{pname} (ID: {pid})]")
+                else:
+                    print(f"[OK] [MOVED] Task #{t_id} [{t_title}] => [{pname} (ID: {pid})]")
 
     remaining_count = len(inbox_tasks) - len(moved_ids)
     for t in inbox_tasks:
