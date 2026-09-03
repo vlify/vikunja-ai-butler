@@ -216,6 +216,47 @@ Generate summary for a specific date:
 ./butler/digest.py --dry-run --date 2026-09-02
 ```
 
+### Run Morning Brief & Reconciliation
+Preview morning news, notifications, and task reconciliation without making changes:
+```bash
+python3 -m butler.morning --dry-run
+```
+
+Run live morning reconciliation and deliver to Matrix (with email fallback):
+```bash
+python3 -m butler.morning
+```
+
+---
+
+## Configuration Keys for Morning Module
+
+Add the following section to `config.yaml` or `config.json`:
+```yaml
+morning:
+  enabled: true
+  matrix:
+    homeserver_url: "https://matrix.org"
+    room_id: "!HOvvSGQLISurrWtLMx:matrix.org"
+    # Set via MATRIX_HOMESERVER_TOKEN or MATRIX_TOKEN in .env for zero secret leakage
+    # token: "syt_..."
+  github:
+    enabled: true
+    gh_bin: "/usr/bin/gh"
+  gmail:
+    enabled: true
+    himalaya_bin: "himalaya"
+    account: "gmail"
+  target_project_id: 1
+```
+
+Supported Environment Variables:
+- `MATRIX_HOMESERVER_URL`: Homeserver endpoint (default: `https://matrix.org`)
+- `MATRIX_ROOM_ID`: Matrix destination room ID
+- `MATRIX_HOMESERVER_TOKEN` / `MATRIX_TOKEN`: Matrix client access token
+- `GH_BIN`: Custom path to `gh` executable
+- `HIMALAYA_BIN`: Custom path to `himalaya` executable
+
 ---
 
 ## Automation (Systemd User Timers)
@@ -229,8 +270,9 @@ Templates for systemd user services and timers are provided in `systemd/`:
 
 2. Enable and start timers:
 ```bash
-systemctl --user enable --now vikunja-butler-classify.timer
-systemctl --user enable --now vikunja-butler-digest.timer
+systemctl --user enable --now vikunja-butler-morning.timer   # 08:30 Daily
+systemctl --user enable --now vikunja-butler-classify.timer  # Nightly inbox classification
+systemctl --user enable --now vikunja-butler-digest.timer    # 23:15 Daily digest
 ```
 
 3. Check timer schedules:

@@ -98,6 +98,24 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": True,
         "file_path": "/tmp/vikunja-ai-butler-last.txt",
     },
+    "morning": {
+        "enabled": True,
+        "matrix": {
+            "homeserver_url": "https://matrix.org",
+            "room_id": "!HOvvSGQLISurrWtLMx:matrix.org",
+            "token": "",
+        },
+        "github": {
+            "enabled": True,
+            "gh_bin": "/usr/bin/gh",
+        },
+        "gmail": {
+            "enabled": True,
+            "himalaya_bin": "himalaya",
+            "account": "gmail",
+        },
+        "target_project_id": 1,
+    },
 }
 
 
@@ -179,5 +197,16 @@ def load_config(config_path: Optional[str] = None, env_path: Optional[str] = Non
         config["timezone"] = os.environ["BUTLER_TIMEZONE"]
     if "LLM_COMMAND" in os.environ and os.environ["LLM_COMMAND"]:
         config.setdefault("llm", {})["command"] = os.environ["LLM_COMMAND"]
+    if "MATRIX_HOMESERVER_URL" in os.environ and os.environ["MATRIX_HOMESERVER_URL"]:
+        config.setdefault("morning", {}).setdefault("matrix", {})["homeserver_url"] = os.environ["MATRIX_HOMESERVER_URL"]
+    if "MATRIX_ROOM_ID" in os.environ and os.environ["MATRIX_ROOM_ID"]:
+        config.setdefault("morning", {}).setdefault("matrix", {})["room_id"] = os.environ["MATRIX_ROOM_ID"]
+    matrix_token_env = os.environ.get("MATRIX_HOMESERVER_TOKEN") or os.environ.get("MATRIX_TOKEN")
+    if matrix_token_env:
+        config.setdefault("morning", {}).setdefault("matrix", {})["token"] = matrix_token_env
+    if "GH_BIN" in os.environ and os.environ["GH_BIN"]:
+        config.setdefault("morning", {}).setdefault("github", {})["gh_bin"] = os.environ["GH_BIN"]
+    if "HIMALAYA_BIN" in os.environ and os.environ["HIMALAYA_BIN"]:
+        config.setdefault("morning", {}).setdefault("gmail", {})["himalaya_bin"] = os.environ["HIMALAYA_BIN"]
 
     return config

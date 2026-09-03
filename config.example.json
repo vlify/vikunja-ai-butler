@@ -33,5 +33,23 @@
   "backup": {
     "enabled": true,
     "file_path": "/tmp/vikunja-ai-butler-last.txt"
+  },
+  "morning": {
+    "enabled": true,
+    "matrix": {
+      "homeserver_url": "https://matrix.org",
+      "room_id": "!HOvvSGQLISurrWtLMx:matrix.org",
+      "token": ""
+    },
+    "github": {
+      "enabled": true,
+      "gh_bin": "/usr/bin/gh"
+    },
+    "gmail": {
+      "enabled": true,
+      "himalaya_bin": "himalaya",
+      "account": "gmail"
+    },
+    "target_project_id": 1
   }
 }

@@ -76,3 +76,24 @@ notifier:
 backup:
   enabled: true
   file_path: "/tmp/vikunja-ai-butler-last.txt"
+
+# Morning News and Task Reconciliation (Morning Brief)
+morning:
+  enabled: true
+  # Matrix Notification Delivery
+  matrix:
+    homeserver_url: "https://matrix.org"
+    room_id: "!HOvvSGQLISurrWtLMx:matrix.org"
+    # Access token MUST come from environment (MATRIX_HOMESERVER_TOKEN) or .env for security.
+    # token: "your_matrix_access_token"
+  # GitHub Notifications Source (0 token)
+  github:
+    enabled: true
+    gh_bin: "/usr/bin/gh"
+  # Gmail Himalaya Source (0 token)
+  gmail:
+    enabled: true
+    himalaya_bin: "himalaya"
+    account: "gmail"
+  # Destination Vikunja Project ID for actionable tasks (default: 1 for Inbox)
+  target_project_id: 1

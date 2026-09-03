@@ -92,6 +92,7 @@ if [[ $INSTALL_UNITS -eq 1 ]]; then
     if command -v systemctl >/dev/null 2>&1; then
         systemctl --user daemon-reload || true
         echo "[OK] Systemd units installed. To enable timers, run:"
+        echo "       systemctl --user enable --now vikunja-butler-morning.timer"
         echo "       systemctl --user enable --now vikunja-butler-classify.timer"
         echo "       systemctl --user enable --now vikunja-butler-digest.timer"
     fi

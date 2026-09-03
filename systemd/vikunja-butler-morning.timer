@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer for Vikunja Daily Morning News & Task Reconciliation
+
+[Timer]
+# Runs daily at 08:30:00 (SPEC-morning.md §3)
+OnCalendar=*-*-* 08:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
