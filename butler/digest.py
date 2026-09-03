@@ -180,6 +180,63 @@ def format_seconds_to_duration(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def build_hourly_timeline_events(raw_json: str, target_date: str, tz_name: str) -> List[Tuple[int, float, str]]:
+    """
+    Parse aw-client --json raw events and aggregate active seconds per local hour.
+    Events spanning hour boundaries are split proportionally.
+    Returns list of (hour, seconds, dominant_app) sorted by hour.
+    """
+    try:
+        data = json.loads(raw_json)
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            events = data[0]
+        elif isinstance(data, list):
+            events = data
+        else:
+            return []
+    except Exception:
+        return []
+
+    try:
+        tz = ZoneInfo(tz_name)
+        day = datetime.date.fromisoformat(target_date)
+        day_start = datetime.datetime(day.year, day.month, day.day, tzinfo=tz)
+        day_end = day_start + datetime.timedelta(days=1)
+    except Exception:
+        return []
+
+    hour_secs: Dict[int, float] = {}
+    hour_apps: Dict[int, Dict[str, float]] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        try:
+            ts = datetime.datetime.fromisoformat(
+                str(ev.get("timestamp", "")).replace("Z", "+00:00")
+            ).astimezone(tz)
+            dur = float(ev.get("duration", 0))
+            app = str((ev.get("data") or {}).get("app", "未知应用"))
+        except Exception:
+            continue
+        seg_start = max(ts, day_start)
+        seg_end = min(ts + datetime.timedelta(seconds=dur), day_end)
+        while seg_start < seg_end:
+            hour_end = seg_start.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1)
+            seg_stop = min(seg_end, hour_end)
+            secs = (seg_stop - seg_start).total_seconds()
+            h = seg_start.hour
+            hour_secs[h] = hour_secs.get(h, 0.0) + secs
+            hour_apps.setdefault(h, {})
+            hour_apps[h][app] = hour_apps[h].get(app, 0.0) + secs
+            seg_start = seg_stop
+
+    result: List[Tuple[int, float, str]] = []
+    for h in sorted(hour_secs):
+        top_app = max(hour_apps[h].items(), key=lambda kv: kv[1])[0]
+        result.append((h, hour_secs[h], top_app))
+    return result
+
+
 def query_activitywatch_breakdown(
     aw_cfg: Dict[str, Any],
     target_date: str,
@@ -199,7 +256,7 @@ def query_activitywatch_breakdown(
     app_query_file = queries_dir / "app-breakdown.txt"
     title_query_file = queries_dir / "title-breakdown.txt"
 
-    def run_query(query_file: Path) -> str:
+    def run_query(query_file: Path, extra_args: Optional[List[str]] = None) -> str:
         if not query_file.is_file():
             return ""
         base_cmd = [
@@ -207,7 +264,7 @@ def query_activitywatch_breakdown(
             "--start", f"{target_date}T00:00:00",
             "--stop", f"{target_date}T23:59:59",
             "--timezone", tz_name,
-        ]
+        ] + list(extra_args or [])
         try:
             if shell_command:
                 import shlex
@@ -257,6 +314,7 @@ def query_activitywatch_breakdown(
 
     app_raw = run_query(app_query_file)
     title_raw = run_query(title_query_file)
+    timeline_raw = run_query(queries_dir / "hourly-timeline.txt", extra_args=["--json"])
 
     # Parse app breakdown
     apps: List[Tuple[str, float, str]] = []
@@ -321,6 +379,13 @@ def query_activitywatch_breakdown(
         for dur_str, disp in titles[:10]:
             lines.append(f"- [{dur_str}] {disp}")
 
+    # 分时段小时级时间线(供 AI 点评还原全天节奏)
+    hourly = build_hourly_timeline_events(timeline_raw, target_date, tz_name)
+    if hourly:
+        lines.append("\n### 分时段时间线 (每小时活跃时长)")
+        for h, secs, top_app in hourly:
+            lines.append(f"- {h:02d}时: {format_seconds_to_duration(secs)} (主要: {top_app})")
+
     return "\n".join(lines)
 
 
@@ -344,8 +409,9 @@ def build_digest_ai_insight(
 1. 【深度交叉印证，严禁机械割裂】：
    - 绝不要把“完成了什么”和“屏幕时间几小时”拆成两半分别叙述！
    - 必须分析【时间投入】与【实际产出】的映射关系（时间投产比）：观察屏幕上的核心应用时长（如终端、开发环境、浏览器、文档等）是否真实印证并支撑了今日完成的硬核成果。
-2. 【洞察专注度与节奏】：
-   - 若高耗时集中于主力生产力工具且拿下关键交付，给予精准的专注度肯定；
+2. 【还原全天时间线与节奏】:
+   - 结合【分时段时间线】逐时段还原一天的真实节奏:什么时候专注攻坚、什么时候缓冲娱乐、节奏是连续还是碎片化;
+   - 【今日已完成任务】的完成时间是节点,时间线是过程——用过程解释节点,讲清楚全天精力如何流动;
    - 若发现时间投入与产出存在偏差（例如长时间处于配置/排查泥潭，或出现零碎应用切换），敏锐客观地指出真实的精力消耗点。
 3. 【文风要求】：
    - 亲切诚恳、犀利敏锐，严禁官话、空话与说教。
