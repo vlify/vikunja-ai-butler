@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=oneshot
 # Systemd user units support %h as the user's home directory.
 # Adjust the working directory and script path to match your installation.
-WorkingDirectory=%h/Projects/vikunja-ai-butler
-ExecStart=%h/Projects/vikunja-ai-butler/butler/classify.py
+WorkingDirectory=%h/.local/share/vikunja-ai-butler
+ExecStart=%h/.local/share/vikunja-ai-butler/butler/classify.py
 Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 StandardOutput=journal
 StandardError=journal
