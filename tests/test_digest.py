@@ -241,7 +241,7 @@ class TestDigest(unittest.TestCase):
                 },
             }
 
-            with patch("butler.digest.load_config", return_value=mock_cfg):
+            with patch("butler.digest_app.engine.load_config", return_value=mock_cfg):
                 with patch("shutil.which", return_value="/usr/bin/himalaya"):
                     with patch("subprocess.run") as mock_run:
                         # Simulate himalaya network or auth error

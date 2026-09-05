@@ -40,8 +40,10 @@ def send_matrix_message(
         raise MatrixDeliveryError("Matrix access token is not configured.")
     if not room_id or not str(room_id).strip():
         raise MatrixDeliveryError("Matrix room_id is not configured.")
+    if not homeserver_url or not str(homeserver_url).strip():
+        raise MatrixDeliveryError("Matrix homeserver_url is not configured.")
 
-    base_url = (homeserver_url or "https://matrix.org").rstrip("/")
+    base_url = homeserver_url.rstrip("/")
     # Build endpoint compatible with standard Matrix Client-Server API
     encoded_room_id = urllib.parse.quote(room_id.strip())
     endpoint = f"{base_url}/_matrix/client/v3/rooms/{encoded_room_id}/send/m.room.message"
@@ -95,7 +97,7 @@ def deliver_morning_report(report_text: str, config: Dict[str, Any]) -> None:
     morning_cfg = config.get("morning", {})
     matrix_cfg = morning_cfg.get("matrix", {}) if isinstance(morning_cfg.get("matrix"), dict) else {}
 
-    homeserver_url = matrix_cfg.get("homeserver_url") or os.environ.get("MATRIX_HOMESERVER_URL") or "https://matrix.org"
+    homeserver_url = matrix_cfg.get("homeserver_url") or os.environ.get("MATRIX_HOMESERVER_URL") or ""
     room_id = matrix_cfg.get("room_id") or os.environ.get("MATRIX_ROOM_ID") or ""
     token = matrix_cfg.get("token") or ""
     # Ductor (agy-bot) credentials file: primary source after the agy-bot
@@ -121,7 +123,19 @@ def deliver_morning_report(report_text: str, config: Dict[str, Any]) -> None:
     matrix_succeeded = False
     matrix_error: Optional[Exception] = None
 
-    if token and room_id:
+    if not homeserver_url or not room_id:
+        print(
+            "[WARN] Matrix homeserver_url or room_id is not configured; Matrix notification skipped (fail-closed).",
+            file=sys.stderr,
+        )
+        matrix_error = MatrixDeliveryError("Matrix homeserver_url or room_id is not configured.")
+    elif not token:
+        print(
+            "[WARN] Matrix token is not configured; Matrix notification skipped (fail-closed).",
+            file=sys.stderr,
+        )
+        matrix_error = MatrixDeliveryError("Matrix token is not configured.")
+    else:
         try:
             send_matrix_message(
                 homeserver_url=homeserver_url,
@@ -133,8 +147,6 @@ def deliver_morning_report(report_text: str, config: Dict[str, Any]) -> None:
         except Exception as e:
             matrix_error = e
             print(f"[WARN] Matrix notification delivery failed: {e}. Falling back to email...", file=sys.stderr)
-    else:
-        matrix_error = MatrixDeliveryError("Matrix token or room_id is missing.")
 
     if matrix_succeeded:
         return

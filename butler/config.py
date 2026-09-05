@@ -77,7 +77,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "digest_project_order": [1, 5, 6, 7],
     },
     "llm": {
-        "command": "./examples/openai-curl.sh \"{prompt}\"",
+        "provider": "openai-compat",
+        "base_url": "http://127.0.0.1:4000/v1",
+        "model": "glm",
+        "api_key_env": "LLM_GATEWAY_KEY",
         "timeout_seconds": 240,
     },
     "activitywatch": {
@@ -96,13 +99,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "backup": {
         "enabled": True,
-        "file_path": "/tmp/vikunja-ai-butler-last.txt",
+        "file_path": "",
     },
     "morning": {
         "enabled": True,
         "matrix": {
-            "homeserver_url": "https://matrix.org",
-            "room_id": "!HOvvSGQLISurrWtLMx:matrix.org",
+            "homeserver_url": "",
+            "room_id": "",
             "token": "",
         },
         "github": {

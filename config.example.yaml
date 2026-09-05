@@ -39,15 +39,13 @@ gtd:
 
 # LLM Classification & Insight Provider
 llm:
-  # Command template to execute LLM.
-  # Use {prompt} placeholder where prompt string or file content is injected.
-  # The command MUST output raw JSON to stdout for classification.
-  # Example 1 (Antigravity CLI wrapper):
-  #   command: "./examples/agy-run.sh -p \"{prompt}\""
-  # Example 2 (OpenAI-compatible curl wrapper):
-  #   command: "./examples/openai-curl.sh \"{prompt}\""
-  command: "./examples/openai-curl.sh \"{prompt}\""
+  provider: openai-compat      # 或 cli
+  base_url: http://127.0.0.1:4000/v1
+  model: glm                   # 网关任一 model_name
+  api_key_env: LLM_GATEWAY_KEY
   timeout_seconds: 240
+  # provider: cli 时
+  # command: ["agy-run.sh"]    # argv 列表,stdin 喂 prompt
 
 # ActivityWatch Screen Time Integration (Optional)
 activitywatch:
@@ -75,15 +73,15 @@ notifier:
 # Local backup and logging
 backup:
   enabled: true
-  file_path: "/tmp/vikunja-ai-butler-last.txt"
+  file_path: "" # 留空默认使用 tempfile.mkstemp 生成 0600 安全临时文件；亦可填写具体绝对路径覆盖
 
 # Morning News and Task Reconciliation (Morning Brief)
 morning:
   enabled: true
   # Matrix Notification Delivery
   matrix:
-    homeserver_url: "https://matrix.org"
-    room_id: "!HOvvSGQLISurrWtLMx:matrix.org"
+    homeserver_url: "" # 留空不发；如使用 Matrix 需配置为 https://matrix.org 或私有 homeserver
+    room_id: "" # 留空不发 (fail-closed)；需配置为目标房间 ID
     # Access token MUST come from environment (MATRIX_HOMESERVER_TOKEN) or .env for security.
     # token: "your_matrix_access_token"
   # GitHub Notifications Source (0 token)

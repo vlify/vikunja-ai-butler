@@ -132,20 +132,38 @@ class VikunjaClient:
     ) -> Dict[str, Any]:
         """
         Create a new task in project_id. If parent_task_id is given, links as subtask.
-        Vikunja endpoint: PUT /api/v1/projects/{project_id}/tasks
+        Two-step creation:
+        1. Create task via PUT /api/v1/projects/{project_id}/tasks
+        2. Attach parent task via PUT /api/v1/tasks/{task_id}/relations with relation_kind='parenttask'
         """
         payload: Dict[str, Any] = {
             "title": str(title).strip()
         }
         if description is not None:
             payload["description"] = str(description).strip()
-        if parent_task_id is not None:
-            payload["related_tasks"] = {
-                "parenttask": [{"id": int(parent_task_id)}]
-            }
+
         endpoint = f"/api/v1/projects/{int(project_id)}/tasks"
         res = self._request(endpoint, method="PUT", payload=payload)
-        return res if isinstance(res, dict) else {}
+        if not isinstance(res, dict):
+            raise VikunjaAPIError(f"Unexpected response when creating task '{title}': {res}")
+
+        task_id = res.get("id")
+        if not task_id:
+            raise VikunjaAPIError(f"Vikunja API did not return task id when creating task '{title}': {res}")
+
+        if parent_task_id is not None:
+            try:
+                self.add_relation(
+                    task_id=task_id,
+                    other_task_id=int(parent_task_id),
+                    relation_kind="parenttask",
+                )
+            except Exception as e:
+                raise VikunjaAPIError(
+                    f"Created task #{task_id} but failed to attach to parent #{parent_task_id}: {e}"
+                ) from e
+
+        return res
 
     def update_task(
         self,
@@ -167,17 +185,29 @@ class VikunjaClient:
             payload["title"] = str(title)
         if description is not None:
             payload["description"] = str(description)
-        if parent_task_id is not None:
-            payload["related_tasks"] = {
-                "parenttask": [{"id": int(parent_task_id)}]
-            }
 
-        if not payload:
+        if not payload and parent_task_id is None:
             return {}
 
         # POST /api/v1/tasks/{id} is standard in Vikunja for updates
         endpoint = f"/api/v1/tasks/{task_id}"
-        return self._request(endpoint, method="POST", payload=payload)
+        res = self._request(endpoint, method="POST", payload=payload)
+
+        # Vikunja silently drops related_tasks in update payloads; parent links
+        # must go through the dedicated relations endpoint (two-step, fail-closed).
+        if parent_task_id is not None:
+            try:
+                self.add_relation(
+                    task_id=task_id,
+                    other_task_id=int(parent_task_id),
+                    relation_kind="parenttask",
+                )
+            except Exception as e:
+                raise VikunjaAPIError(
+                    f"Updated task #{task_id} but failed to attach to parent #{parent_task_id}: {e}"
+                ) from e
+
+        return res if isinstance(res, dict) else {}
 
     def add_relation(
         self,
