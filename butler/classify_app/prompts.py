@@ -76,6 +76,8 @@ GTD Heuristics & Directives:
 Safety Constraints:
 - NEVER delete tasks, NEVER modify done status.
 - Moving to unlisted lists or Inbox itself is strictly forbidden.
+- NEVER output an empty "subtasks" array. If "subtasks" is present (on "spawn" or "move"), it MUST contain 1 to 3 non-empty concrete strings. If you cannot list concrete next actions, OMIT the "subtasks" field entirely.
+- "spawn" is ONLY for existing active parent tasks outside Inbox. For any Inbox task, use "move" (optionally with "subtasks") instead.
 - Total optimization actions on active tasks MUST NOT exceed {max_active_mutations} (be selective, focus on the most impactful refinements).
 - Output strict JSON array without Markdown fences or extra commentary.
 
