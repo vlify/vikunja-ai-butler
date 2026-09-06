@@ -520,7 +520,9 @@ class TestMorningContracts(unittest.TestCase):
             vikunja_ok=False,
         )
         self.assertIn("不可用", report_failed)
-        self.assertEqual(report_failed.count("不可用"), 3)
+        # 3 个分节"不可用" + 顶部 fail-closed 告警 1 处("Vikunja 数据不可用")
+        self.assertEqual(report_failed.count("不可用"), 4)
+        self.assertIn("⚠️ **Vikunja 数据不可用**", report_failed)
 
     # ----------------------------------------------------------------------
     # 9. test_matrix_delivery_and_email_fallback

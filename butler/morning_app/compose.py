@@ -22,6 +22,14 @@ def format_morning_report(
     """
     sections: List[str] = [f"📬 **消息与待办 · {target_date}**"]
 
+    # Fail-closed 顶部告警:Vikunja 不可达时,对账与待办状态不可信,
+    # 必须在报告最显眼处声明,防止读者把整体内容当可信数据(2026-09-06 教训)
+    if not vikunja_ok:
+        sections.append(
+            "⚠️ **Vikunja 数据不可用**(服务未响应,今日待办对账与任务列表不可信;"
+            "条目未入待办,服务恢复后下一轮会重新对账)"
+        )
+
     # 1. Actionable items
     sections.append("📥 **需要行动**")
     if not gh_ok and not mail_ok:
